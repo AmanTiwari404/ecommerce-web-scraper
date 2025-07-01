@@ -1,15 +1,13 @@
-# dependencies
+# Node modules
 node_modules/
+# Environment variables
 .env
-
-# build
+# Build folders
 .next/
 dist/
-
-# logs
-logs
+# Logs
+logs/
 *.log
-
-# OS
-.DS_Store
-Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

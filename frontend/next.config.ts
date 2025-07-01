@@ -1,9 +1,9 @@
-// next.config.ts
-const nextConfig = {
-  images: {
-    domains: ['m.media-amazon.com'],
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+images: {
+  domains: ['m.media-amazon.com'], 
   },
-}
+};
 
-export default nextConfig
-
+export default nextConfig;

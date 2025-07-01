@@ -1,7 +1,11 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
 const mongoose = require('mongoose');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const cheerio = require('cheerio');
+const axios = require('axios');
+puppeteer.use(StealthPlugin());
 require('dotenv').config();
 
 const app = express();
@@ -10,7 +14,6 @@ const PORT = 5000;
 app.use(cors());
 app.use(express.json());
 
-// 🔌 MongoDB connection
 mongoose
   .connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
@@ -19,19 +22,8 @@ mongoose
   .then(() => console.log('✅ Connected to MongoDB'))
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
-// 📦 Product schema
-const productSchema = new mongoose.Schema({
-  asin: { type: String, required: true, unique: true },
-  title: String,
-  image: String,
-  currentPrice: Number,
-  previousPrice: Number,
-  lastChecked: { type: Date, default: Date.now },
-});
-
 const Product = require('./models/Product');
 
-//Scraping route
 app.get('/api/scrape', async (req, res) => {
   const { url } = req.query;
 
@@ -42,22 +34,22 @@ app.get('/api/scrape', async (req, res) => {
   try {
     const browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
     const page = await browser.newPage();
     await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     );
 
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: 30000,
+      timeout: 30000
     });
 
     const title = await page.$eval('#productTitle', el => el.textContent.trim());
 
-    let priceText = 'Price not found';
+    let price = 'Price not found';
     const priceSelectors = [
       '#priceblock_ourprice',
       '#priceblock_dealprice',
@@ -65,17 +57,14 @@ app.get('/api/scrape', async (req, res) => {
       '.a-price .a-offscreen',
       '#corePrice_feature_div .a-offscreen',
     ];
-
     for (const selector of priceSelectors) {
       try {
-        priceText = await page.$eval(selector, el => el.textContent.trim());
-        if (priceText) break;
+        price = await page.$eval(selector, el => el.textContent.trim());
+        if (price) break;
       } catch {}
     }
 
-    const price = parseFloat(priceText.replace(/[^\d.]/g, '')) || null;
-
-    let image = 'Image not found';
+    let image = null;
     try {
       image = await page.$eval('#landingImage', img => img.src);
     } catch {
@@ -84,12 +73,11 @@ app.get('/api/scrape', async (req, res) => {
       } catch {}
     }
 
-    // Get product features
     let features = [];
-     try {
-        features = await page.$$eval('#feature-bullets ul li span', spans =>
-        spans.map(span => span.textContent.trim()).filter(text => !!text)
-    );
+    try {
+      features = await page.$$eval('#feature-bullets ul li span', spans =>
+        spans.map(span => span.textContent.trim()).filter(Boolean)
+      );
     } catch {
       features = ['No features found'];
     }
@@ -104,10 +92,94 @@ app.get('/api/scrape', async (req, res) => {
     }
 
     const existing = await Product.findOne({ asin });
+    const numericPrice = parseFloat(price.replace(/[₹,]/g, ''));
 
     if (existing) {
       await Product.updateOne(
         { asin },
+        {
+          $set: {
+            title,
+            image,
+            previousPrice: existing.currentPrice,
+            currentPrice: numericPrice,
+            lastChecked: new Date(),
+          },
+          $push: {
+            priceHistory: {
+              price: numericPrice,
+              date: new Date(),
+            },
+          },
+        }
+      );
+    } else {
+      await Product.create({
+        asin,
+        title,
+        image,
+        currentPrice: numericPrice,
+        previousPrice: null,
+        priceHistory: [{ price: numericPrice }],
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        title,
+        price: numericPrice,
+        image,
+        asin,
+        features,
+        site: 'amazon'
+      },
+    });
+  } catch (error) {
+    console.error('Amazon scrape failed:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Amazon scraping failed: ' + error.message,
+    });
+  }
+});
+
+app.get('/api/scrape/flipkart', async (req, res) => {
+  const { url } = req.query;
+
+  if (!url || !url.includes('flipkart')) {
+    return res.status(400).json({ success: false, error: 'Invalid Flipkart URL' });
+  }
+
+  try {
+    const apiKey = 'f6593906d48001223d99802dc1bd047e'; // Replace with your ScraperAPI key
+    const scraperUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+
+    const response = await axios.get(scraperUrl);
+    const $ = cheerio.load(response.data);
+
+    const title = $('span.B_NuCI').first().text().trim();
+    const priceText = $('div._30jeq3._16Jk6d').first().text().trim();
+    const price = parseFloat(priceText.replace(/[₹,]/g, '')) || null;
+    const image = $('img._396cs4').first().attr('src') || 'Image not found';
+
+    let features = [];
+    $('ul._1xgFaf li').each((i, el) => {
+      features.push($(el).text().trim());
+    });
+
+    const productIdMatch = url.match(/\/p\/([^/?]+)/);
+    const productId = productIdMatch ? productIdMatch[1] : null;
+
+    if (!productId) {
+      return res.status(400).json({ success: false, error: 'Invalid product ID' });
+    }
+
+    const existing = await Product.findOne({ asin: productId });
+
+    if (existing) {
+      await Product.updateOne(
+        { asin: productId },
         {
           $set: {
             title,
@@ -118,7 +190,7 @@ app.get('/api/scrape', async (req, res) => {
           },
           $push: {
             priceHistory: {
-              price: price,
+              price,
               date: new Date(),
             },
           },
@@ -126,7 +198,7 @@ app.get('/api/scrape', async (req, res) => {
       );
     } else {
       await Product.create({
-        asin,
+        asin: productId,
         title,
         image,
         currentPrice: price,
@@ -139,24 +211,18 @@ app.get('/api/scrape', async (req, res) => {
       success: true,
       data: {
         title,
-        price: price ?? 'Price not found',
+        price,
         image,
-        asin,
         features,
+        asin: productId,
+        site: 'flipkart',
       },
     });
+
   } catch (error) {
-    console.error('Scrape failed:', error.message);
-    return res.status(500).json({
-      success: false,
-      error: 'Scraping failed: ' + error.message,
-    });
+    console.error('Flipkart scrape (ScraperAPI) failed:', error.message);
+    return res.status(500).json({ success: false, error: 'Flipkart scraping failed: ' + error.message });
   }
-});
-
-
-app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
 });
 
 app.get('/api/history', async (req, res) => {
@@ -179,7 +245,7 @@ app.get('/api/history', async (req, res) => {
         asin: product.asin,
         title: product.title,
         image: product.image,
-        priceHistory: product.priceHistory, 
+        priceHistory: product.priceHistory,
       },
     });
   } catch (err) {
@@ -187,5 +253,6 @@ app.get('/api/history', async (req, res) => {
   }
 });
 
-
-
+app.listen(PORT, () => {
+  console.log(`✅ Server running at http://localhost:${PORT}`);
+});

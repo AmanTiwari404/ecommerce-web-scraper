@@ -13,15 +13,15 @@ interface ProductData {
 }
 
 export default function ScraperForm() {
-  const [url, setUrl] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [url, setUrl] = useState<string>('')
+  const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<ProductData | null>(null)
-  const [error, setError] = useState('')
-  const [range, setRange] = useState<'7d' | '30d'>('30d')
+  const [error, setError] = useState<string>('')
+  const [darkMode, setDarkMode] = useState<boolean>(false)
 
   const handleScrape = async () => {
-    if (!url.includes('amazon')) {
-      setError('Please enter a valid Amazon product URL')
+    if (!url.includes('amazon') && !url.includes('flipkart')) {
+      setError('Please enter a valid Amazon or Flipkart product URL')
       return
     }
 
@@ -30,7 +30,8 @@ export default function ScraperForm() {
     setData(null)
 
     try {
-      const res = await fetch(`http://localhost:5000/api/scrape?url=${encodeURIComponent(url)}`)
+      const platform = url.includes('flipkart') ? 'flipkart' : 'amazon'
+      const res = await fetch(`http://localhost:5000/api/scrape/${platform}?url=${encodeURIComponent(url)}`)
       const result = await res.json()
 
       if (result.success) {
@@ -38,70 +39,88 @@ export default function ScraperForm() {
       } else {
         setError(result.error || 'Scraping failed')
       }
-    } catch (err: any) {
-      setError('Server error: ' + err.message)
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError('Server error: ' + err.message)
+      } else {
+        setError('Unknown error occurred')
+      }
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="max-w-xl mx-auto p-6 bg-white rounded-2xl shadow-xl mt-10 space-y-4">
-      <h1 className="text-2xl font-bold text-gray-800">Amazon Product Scraper</h1>
+    <div className={`${darkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'} min-h-screen transition-colors duration-300`}>
+      <div className="max-w-4xl mx-auto p-6 mt-10 rounded-2xl shadow-xl">
+        <h1 className="text-3xl font-bold mb-6 text-center">🛒E-commerce Product Price Tracker</h1>
 
-      <input
-        type="text"
-        placeholder="Enter Amazon product URL"
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
-
-      
-      <div className="flex justify-between items-center mt-2">
-        <label className="text-sm font-medium text-gray-600">Price History Range:</label>
-        <select
-          value={range}
-          onChange={(e) => setRange(e.target.value as '7d' | '30d')}
-          className="px-2 py-1 border rounded-md text-sm"
-        >
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-        </select>
-      </div>
-
-      <button
-        onClick={handleScrape}
-        disabled={loading || !url}
-        className={`w-full text-white px-4 py-2 rounded-lg transition ${
-          loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-        }`}
-      >
-        {loading ? 'Scraping...' : 'Scrape Product'}
-      </button>
-
-      {error && <p className="text-red-500 text-sm">{error}</p>}
-
-      {data && (
-        <div className="border-t pt-4 space-y-3">
-          <h2 className="text-lg font-semibold text-gray-900">{data.title}</h2>
-          <p className="text-green-600 font-bold">₹ {data.price}</p>
-
-          {data.image && (
-            <div className="w-full flex justify-center">
-              <Image
-                src={data.image}
-                alt="Product"
-                width={200}
-                height={200}
-                className="rounded-xl shadow object-contain"
-              />
-            </div>
-          )}
-
-          {data.asin && <PriceChart asin={data.asin} range={range} />}
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="px-4 py-1 text-sm font-medium border rounded-md shadow bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600"
+          >
+            Toggle {darkMode ? 'Light' : 'Dark'} Mode
+          </button>
         </div>
-      )}
+
+        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          <input
+            type="text"
+            placeholder="Enter Amazon or Flipkart product URL"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-inherit"
+          />
+          <button
+            onClick={handleScrape}
+            disabled={loading || !url}
+            className={`px-6 py-2 rounded-lg font-medium transition ${
+              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            {loading ? 'Scraping...' : 'Scrape'}
+          </button>
+        </div>
+
+        {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+
+        {data && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 md:p-8 grid md:grid-cols-2 gap-8">
+            <div className="flex justify-center items-center">
+              {data.image && data.image.startsWith('http') && (
+                <Image
+                  src={data.image}
+                  alt="Product"
+                  width={320}
+                  height={320}
+                  className="rounded-lg shadow-md object-contain"
+                />
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <h2 className="text-2xl font-semibold">{data.title}</h2>
+              <p className="text-green-500 text-xl font-bold">₹ {data.price}</p>
+
+              {data.features && data.features.length > 0 && (
+                <ul className="list-disc list-inside space-y-1">
+                  {data.features.map((feature, index) => (
+                    <li key={index}>{feature}</li>
+                  ))}
+                </ul>
+              )}
+
+              {data.asin && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold mb-2">Price History</h3>
+                  <PriceChart asin={data.asin} isDarkMode={darkMode} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
