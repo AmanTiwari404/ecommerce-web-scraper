@@ -32,7 +32,9 @@ export default function ScraperForm() {
 
     try {
       const platform = url.includes('flipkart') ? 'flipkart' : '' // Empty for Amazon
-      const fetchUrl = `http://localhost:5000/api/scrape${platform ? `/${platform}` : ''}?url=${encodeURIComponent(url)}`
+      const API_BASE = "https://ecommerce-web-scraper.onrender.com"; 
+      const fetchUrl = `${API_BASE}/api/scrape${platform ? `/${platform}` : ''}?url=${encodeURIComponent(url)}`
+
       console.log('📡 Fetching:', fetchUrl)
 
       const res = await fetch(fetchUrl)
