@@ -10,6 +10,7 @@ interface ProductData {
   image: string
   asin: string
   features?: string[]
+  site?: string
 }
 
 export default function ScraperForm() {
@@ -30,8 +31,11 @@ export default function ScraperForm() {
     setData(null)
 
     try {
-      const platform = url.includes('flipkart') ? 'flipkart' : 'amazon'
-      const res = await fetch(`http://localhost:5000/api/scrape/${platform}?url=${encodeURIComponent(url)}`)
+      const platform = url.includes('flipkart') ? 'flipkart' : '' // Empty for Amazon
+      const fetchUrl = `http://localhost:5000/api/scrape${platform ? `/${platform}` : ''}?url=${encodeURIComponent(url)}`
+      console.log('📡 Fetching:', fetchUrl)
+
+      const res = await fetch(fetchUrl)
       const result = await res.json()
 
       if (result.success) {

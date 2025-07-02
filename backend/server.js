@@ -5,28 +5,29 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const cheerio = require('cheerio');
 const axios = require('axios');
-puppeteer.use(StealthPlugin());
 require('dotenv').config();
 
+puppeteer.use(StealthPlugin());
+
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+// Connect MongoDB
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('✅ Connected to MongoDB'))
+.catch(err => console.error('❌ MongoDB connection error:', err));
 
 const Product = require('./models/Product');
 
+// Amazon Scraping
 app.get('/api/scrape', async (req, res) => {
   const { url } = req.query;
-
   if (!url || !url.startsWith('http')) {
     return res.status(400).json({ success: false, error: 'Invalid URL' });
   }
@@ -34,18 +35,14 @@ app.get('/api/scrape', async (req, res) => {
   try {
     const browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
     const page = await browser.newPage();
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     );
-
-    await page.goto(url, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
-    });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     const title = await page.$eval('#productTitle', el => el.textContent.trim());
 
@@ -87,12 +84,10 @@ app.get('/api/scrape', async (req, res) => {
     const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/);
     const asin = asinMatch ? asinMatch[1] : null;
 
-    if (!asin) {
-      return res.status(400).json({ success: false, error: 'Invalid ASIN' });
-    }
+    if (!asin) return res.status(400).json({ success: false, error: 'Invalid ASIN' });
 
     const existing = await Product.findOne({ asin });
-    const numericPrice = parseFloat(price.replace(/[₹,]/g, ''));
+    const numericPrice = parseFloat(price.replace(/[₹,]/g, '')) || null;
 
     if (existing) {
       await Product.updateOne(
@@ -106,10 +101,7 @@ app.get('/api/scrape', async (req, res) => {
             lastChecked: new Date(),
           },
           $push: {
-            priceHistory: {
-              price: numericPrice,
-              date: new Date(),
-            },
+            priceHistory: { price: numericPrice, date: new Date() },
           },
         }
       );
@@ -126,24 +118,16 @@ app.get('/api/scrape', async (req, res) => {
 
     return res.json({
       success: true,
-      data: {
-        title,
-        price: numericPrice,
-        image,
-        asin,
-        features,
-        site: 'amazon'
-      },
+      data: { title, price: numericPrice, image, asin, features, site: 'amazon' },
     });
+
   } catch (error) {
     console.error('Amazon scrape failed:', error.message);
-    return res.status(500).json({
-      success: false,
-      error: 'Amazon scraping failed: ' + error.message,
-    });
+    return res.status(500).json({ success: false, error: 'Amazon scraping failed: ' + error.message });
   }
 });
 
+// Flipkart Scraping
 app.get('/api/scrape/flipkart', async (req, res) => {
   const { url } = req.query;
 
@@ -152,7 +136,7 @@ app.get('/api/scrape/flipkart', async (req, res) => {
   }
 
   try {
-    const apiKey = 'f6593906d48001223d99802dc1bd047e'; // Replace with your ScraperAPI key
+    const apiKey = process.env.SCRAPER_API_KEY;
     const scraperUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
     const response = await axios.get(scraperUrl);
@@ -161,7 +145,7 @@ app.get('/api/scrape/flipkart', async (req, res) => {
     const title = $('span.B_NuCI').first().text().trim();
     const priceText = $('div._30jeq3._16Jk6d').first().text().trim();
     const price = parseFloat(priceText.replace(/[₹,]/g, '')) || null;
-    const image = $('img._396cs4').first().attr('src') || 'Image not found';
+    const image = $('img._396cs4').first().attr('src') || null;
 
     let features = [];
     $('ul._1xgFaf li').each((i, el) => {
@@ -189,10 +173,7 @@ app.get('/api/scrape/flipkart', async (req, res) => {
             lastChecked: new Date(),
           },
           $push: {
-            priceHistory: {
-              price,
-              date: new Date(),
-            },
+            priceHistory: { price, date: new Date() },
           },
         }
       );
@@ -220,11 +201,12 @@ app.get('/api/scrape/flipkart', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Flipkart scrape (ScraperAPI) failed:', error.message);
+    console.error('Flipkart scrape failed:', error.message);
     return res.status(500).json({ success: false, error: 'Flipkart scraping failed: ' + error.message });
   }
 });
 
+// Price History
 app.get('/api/history', async (req, res) => {
   const { asin } = req.query;
 
