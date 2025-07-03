@@ -15,6 +15,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+if (!process.env.MONGODB_URI) {
+  console.error('❌ MONGODB_URI not set in environment variables');
+  process.exit(1);
+}
+if (!process.env.SCRAPER_API_KEY) {
+  console.error('❌ SCRAPER_API_KEY not set in environment variables');
+  // Not exiting, but Flipkart scraping will fail without this
+}
+
 // Connect MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
@@ -140,18 +149,40 @@ app.get('/api/scrape/flipkart', async (req, res) => {
     const scraperUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
 
     const response = await axios.get(scraperUrl);
-    const $ = cheerio.load(response.data);
+    const html = response.data;
 
-    const title = $('span.B_NuCI').first().text().trim();
-    const priceText = $('div._30jeq3._16Jk6d').first().text().trim();
+    // Check for bot protection/captcha
+    if (!html || html.toLowerCase().includes('captcha')) {
+      return res.status(500).json({ success: false, error: 'Blocked by Flipkart. Try again later.' });
+    }
+
+    const $ = cheerio.load(html);
+
+    // Title
+    let title = $('span.B_NuCI').first().text().trim();
+    if (!title) title = $('span._35KyD6').first().text().trim();
+
+    // Price
+    let priceText = $('div._30jeq3._16Jk6d').first().text().trim();
+    if (!priceText) priceText = $('div._30jeq3').first().text().trim();
     const price = parseFloat(priceText.replace(/[₹,]/g, '')) || null;
-    const image = $('img._396cs4').first().attr('src') || null;
 
+    // Image
+    let image = $('img._396cs4').first().attr('src') || null;
+    if (!image) image = $('img._2r_T1I').first().attr('src') || null;
+
+    // Features
     let features = [];
     $('ul._1xgFaf li').each((i, el) => {
       features.push($(el).text().trim());
     });
+    if (features.length === 0) {
+      $('div._2418kt ul li').each((i, el) => {
+        features.push($(el).text().trim());
+      });
+    }
 
+    // Product ID
     const productIdMatch = url.match(/\/p\/([^/?]+)/);
     const productId = productIdMatch ? productIdMatch[1] : null;
 

@@ -11,6 +11,19 @@ interface Props {
   isDarkMode: boolean
 }
 
+function groupByDay(history: { price: number; date: string }[]) {
+  // Map to store latest price per day
+  const map = new Map<string, { price: number; date: string }>()
+  history.forEach((entry) => {
+    // Get date in YYYY-MM-DD format
+    const day = new Date(entry.date).toISOString().slice(0, 10)
+    // Always keep the latest (last in array) for the day
+    map.set(day, { price: entry.price, date: day })
+  })
+  // Return sorted by date ascending
+  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date))
+}
+
 export default function PriceChart({ asin, isDarkMode }: Props) {
   const [data, setData] = useState<{ price: number; date: string }[]>([])
   const [range, setRange] = useState<'7d' | '30d' | 'all'>('30d')
